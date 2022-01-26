@@ -61,7 +61,7 @@ def neo4j_local_admins(context):
     admin_results = [record for record in admins.data()]
 
 def create_db(local_admins):
-    cursor.execute('''CREATE TABLE if not exists pc_and_admins ("pc_name" TEXT UNIQUE, "local_admins" TEXT, "dumped" TEXT, "is_DC" TEXT)''')
+    cursor.execute('''CREATE TABLE if not exists pc_and_admins ("pc_name" TEXT UNIQUE, "local_admins" TEXT, "dumped" TEXT''')
     for result in local_admins:
         cursor.execute("INSERT OR IGNORE INTO pc_and_admins(pc_name, local_admins, dumped) VALUES(?, ?, ?)", (result.get('COMPUTER'),str(result.get('USERS'),),'FALSE'))
     dbconnection.commit()
@@ -82,7 +82,7 @@ def process_creds(context, connection, credentials_data):
         if nthash == 'aad3b435b51404eeaad3b435b51404ee' or nthash =='31d6cfe0d16ae931b73c59d7e0c089c0':
             context.log.error(f"Hash for {username} is expired.")
         elif username not in found_users:
-            context.log.success(f"Found hashes for: {username}:{nthash}. Adding them to the DB and marking user as owned in BH.")
+            context.log.success(f"Found hashes for: {username}:{nthash} on {connection.host}. Adding them to the DB and marking user as owned in BH.")
             found_users.append(username)
             cursor.execute("UPDATE admin_users SET hash = ? WHERE username LIKE '" + username + "%'", [nthash])
             dbconnection.commit()
