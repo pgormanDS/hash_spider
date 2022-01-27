@@ -19,4 +19,4 @@ cme smb <IP> -u <user> -p <password> -M hash_spider
 * Add differentiation between hash and plaintext password (current behavior of a plaintext password dumped is untested)
 * Fix overall CME output to show the IP and hostname of the current machine and not always report the initial IP and hostname
 * Add initial account creds to database
-* Mark dumped computers as owned in BH
+* ~~Mark dumped computers as owned in BH~~
