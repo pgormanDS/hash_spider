@@ -61,7 +61,7 @@ def neo4j_local_admins(context):
     admin_results = [record for record in admins.data()]
 
 def create_db(local_admins):
-    cursor.execute('''CREATE TABLE if not exists pc_and_admins ("pc_name" TEXT UNIQUE, "local_admins" TEXT, "dumped" TEXT''')
+    cursor.execute('''CREATE TABLE if not exists pc_and_admins ("pc_name" TEXT UNIQUE, "local_admins" TEXT, "dumped" TEXT)''')
     for result in local_admins:
         cursor.execute("INSERT OR IGNORE INTO pc_and_admins(pc_name, local_admins, dumped) VALUES(?, ?, ?)", (result.get('COMPUTER'),str(result.get('USERS'),),'FALSE'))
     dbconnection.commit()
@@ -96,7 +96,6 @@ def process_creds(context, connection, credentials_data):
                     for path in path['p']:
                         context.log.success(f"You have a valid path to DA as {path['name']}.")
                         sys.exit()
-
             
 class CMEModule:
     name = 'hash_spider'
