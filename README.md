@@ -9,4 +9,4 @@ Run CME against a PC your user has local admin access to and call the hash_spide
 ```
 cme smb <IP> -u <user> -p <password> -M hash_spider
 ```
-![image](https://user-images.githubusercontent.com/86318031/152021215-c5a7fc48-5428-45ce-a87f-552efb54acae.png)
+<img width="1366" alt="hash_spider" src="https://user-images.githubusercontent.com/86318031/152021343-279343e9-3bc2-4def-91ec-f876b6a15f0c.png">
