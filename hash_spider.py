@@ -104,7 +104,7 @@ def process_creds(context, connection, credentials_data):
             username = (f"{username.upper()}@{connection.domain.upper()}")
             session = driver.session()
             session.run('MATCH (u) WHERE (u.name = "' + username + '") SET u.owned=True RETURN u,u.name,u.owned')
-            path_to_da = session.run("MATCH p=shortestPath((n)-[*1..]->(m)) WHERE exists(n.owned) AND m.name=~ '.*DOMAIN ADMINS.*' RETURN p")
+            path_to_da = session.run("MATCH p=shortestPath((n)-[*1..]->(m)) WHERE n.owned=true AND m.name=~ '.*DOMAIN ADMINS.*' RETURN p")
             paths = [record for record in path_to_da.data()]
             for path in paths:
                 if path:
